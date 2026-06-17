@@ -1,34 +1,20 @@
-import { Controller, Get } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { Controller, Get, UseGuards, Req } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import type { Request } from 'express';
+import { PrescriptionsService } from '../services/prescriptions.service';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 @ApiTags('prescriptions')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('prescriptions')
 export class PrescriptionsController {
-  @ApiOperation({ summary: 'Cofre médico — receituários (mock)' })
+  constructor(private readonly prescriptionsService: PrescriptionsService) {}
+
+  @ApiOperation({ summary: 'Obter receituários e laudos do usuário logado' })
   @Get()
-  listPrescriptions() {
-    return [
-      {
-        id: '1',
-        title: 'Receita: Tirzepatida',
-        sentBy: 'Dr. James',
-        date: '15/05/2026',
-        status: 'Assinado digitalmente (ICP-Brasil)',
-      },
-      {
-        id: '2',
-        title: 'Pedido de Exames de Sangue',
-        sentBy: 'Dr. James',
-        date: '14/05/2026',
-        status: 'Assinado digitalmente (ICP-Brasil)',
-      },
-      {
-        id: '3',
-        title: 'Laudo de Bioimpedância',
-        sentBy: 'Clínica',
-        date: '10/05/2026',
-        status: 'Documento Verificado',
-      },
-    ];
+  async listPrescriptions(@Req() req: Request) {
+    const user = req.user as any;
+    return this.prescriptionsService.listPrescriptions(user.id);
   }
 }

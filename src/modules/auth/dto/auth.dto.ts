@@ -29,6 +29,9 @@ export class AuthResponseDto {
   @ApiProperty()
   accessToken: string;
 
+  @ApiProperty({ required: false })
+  needsProfileSetup?: boolean;
+
   @ApiProperty()
   user: {
     id: string;
@@ -36,4 +39,16 @@ export class AuthResponseDto {
     email: string;
     plan: string;
   };
+}
+
+export class SetPasswordDto {
+  @ApiProperty({ example: 'NovaSenh@123' })
+  @IsString()
+  @MinLength(6)
+  password: string;
+
+  @ApiProperty({ example: 'Itamar Ribeiro', required: false })
+  @IsString()
+  @IsNotEmpty()
+  name?: string;
 }

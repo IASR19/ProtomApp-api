@@ -26,12 +26,16 @@ export class UserEntity extends BaseEntity {
   sex: string;
 
   @ApiProperty()
-  @Column({ type: 'decimal', precision: 4, scale: 2, nullable: true })
+  @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
   height: number;
 
   @ApiProperty()
   @Column({ type: 'decimal', precision: 6, scale: 2, nullable: true })
   weight: number;
+
+  @ApiProperty()
+  @Column({ type: 'decimal', precision: 6, scale: 2, nullable: true })
+  initialWeight: number;
 
   @ApiProperty()
   @Column({ type: 'decimal', precision: 6, scale: 2, nullable: true })
@@ -52,4 +56,20 @@ export class UserEntity extends BaseEntity {
   @ApiProperty()
   @Column({ type: 'boolean', default: false })
   disclaimerAccepted: boolean;
+
+  @Column({ type: 'varchar', length: 255, nullable: true, select: false })
+  refreshTokenHash: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true, unique: true })
+  googleId: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true, unique: true })
+  appleId: string | null;
+
+  @ApiProperty()
+  @Column({ type: 'boolean', default: false })
+  isEmailVerified: boolean;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  emailVerificationToken: string | null;
 }
