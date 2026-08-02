@@ -35,6 +35,7 @@ import { MealEntity } from './modules/nutrition/entities/meal.entity';
         username: config.get('DB_USER', 'postgres'),
         password: config.get('DB_PASS', 'postgres'),
         database: config.get('DB_NAME', 'protomapp'),
+        schema: config.get('DB_SCHEMA', 'app'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
         synchronize: config.get('NODE_ENV') !== 'production',
         logging: config.get('NODE_ENV') === 'development',
