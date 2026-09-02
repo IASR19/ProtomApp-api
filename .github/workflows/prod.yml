@@ -1,0 +1,118 @@
+name: Prod CI/CD
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prod-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-test-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check vulnerable packages
+        run: |
+          audit_status=0
+          echo "## Vulnerable Packages" >> "$GITHUB_STEP_SUMMARY"
+          if npm audit --omit=dev --audit-level=critical > audit.txt 2>&1; then
+            echo "No production vulnerabilities reported." >> "$GITHUB_STEP_SUMMARY"
+          else
+            audit_status=$?
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat audit.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          cat audit.txt
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          exit "$audit_status"
+
+      - name: Report outdated packages
+        run: |
+          echo "## Outdated Packages" >> "$GITHUB_STEP_SUMMARY"
+          if npm outdated --omit=dev > outdated.txt 2>&1; then
+            echo "No outdated production packages." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat outdated.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          cat outdated.txt
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Lint
+        run: npm run lint:ci || npm run lint
+
+      - name: Test
+        run: npm run test
+
+      - name: End-to-end tests
+        run: npm run test:e2e
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: postgres
+          DB_PASS: postgres
+          DB_NAME: protom_test
+          JWT_SECRET: prod-ci-e2e-access-token-secret
+
+      - name: Build
+        run: npm run build
+
+      - name: Assemble runtime artifact
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          rm -rf runtime
+          mkdir -p runtime
+          cp package.json runtime/
+          if [ -f package-lock.json ]; then cp package-lock.json runtime/; fi
+          cp -R dist runtime/dist
+          cd runtime
+          npm ci --omit=dev --ignore-scripts
+
+      - name: Upload runtime artifact
+        if: ${{ github.event_name == 'push' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-artifact
+          path: runtime/
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: lint-test-and-build
+    if: ${{ github.event_name == 'push' }}
+    environment:
+      name: production
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: runtime-artifact
+          path: app/
+
+      - name: Deploy to Railway (Prod)
+        uses: brentjanderson/railway-deploy@v1
+        with:
+          railway_token: ${{ secrets.RAILWAY_TOKEN }}
+          service: ${{ secrets.RAILWAY_SERVICE_NAME }}
