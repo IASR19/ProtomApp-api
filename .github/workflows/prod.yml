@@ -31,6 +31,31 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Ensure database schema exists
+        run: |
+          node -e "
+            const { Client } = require('pg');
+            const client = new Client({
+              host: process.env.DB_HOST,
+              port: parseInt(process.env.DB_PORT || '5432'),
+              user: process.env.DB_USER,
+              password: process.env.DB_PASS,
+              database: process.env.DB_NAME,
+              ssl: process.env.DB_HOST !== 'localhost' ? { rejectUnauthorized: false } : false
+            });
+            client.connect()
+              .then(() => client.query('CREATE SCHEMA IF NOT EXISTS \"' + (process.env.DB_SCHEMA || 'app') + '\";'))
+              .then(() => { console.log('Schema ensured successfully'); client.end(); })
+              .catch(err => { console.error('Error ensuring schema:', err); process.exit(1); });
+          "
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASS: ${{ secrets.DB_PASS }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_SCHEMA: ${{ secrets.DB_SCHEMA }}
+
       - name: Run database migrations
         run: npm run migration:run
         env:
