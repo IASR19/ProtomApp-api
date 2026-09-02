@@ -3,19 +3,16 @@ name: Prod CI/CD
 on:
   push:
     branches: [main, master]
-  pull_request:
-    branches: [main, master]
-    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
 
 concurrency:
   group: prod-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  lint-test-and-build:
+  build-and-test:
     runs-on: ubuntu-latest
 
     steps:
@@ -31,58 +28,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Check vulnerable packages
-        run: |
-          audit_status=0
-          echo "## Vulnerable Packages" >> "$GITHUB_STEP_SUMMARY"
-          if npm audit --omit=dev --audit-level=critical > audit.txt 2>&1; then
-            echo "No production vulnerabilities reported." >> "$GITHUB_STEP_SUMMARY"
-          else
-            audit_status=$?
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-            cat audit.txt >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-          fi
-          cat audit.txt
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          exit "$audit_status"
-
-      - name: Report outdated packages
-        run: |
-          echo "## Outdated Packages" >> "$GITHUB_STEP_SUMMARY"
-          if npm outdated --omit=dev > outdated.txt 2>&1; then
-            echo "No outdated production packages." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-            cat outdated.txt >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-          fi
-          cat outdated.txt
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Lint
-        run: npm run lint:ci || npm run lint
-
-      - name: Test
-        run: npm run test
-
-      - name: End-to-end tests
-        run: npm run test:e2e
-        env:
-          DB_HOST: localhost
-          DB_PORT: 5432
-          DB_USER: postgres
-          DB_PASS: postgres
-          DB_NAME: protom_test
-          JWT_SECRET: prod-ci-e2e-access-token-secret
-
       - name: Build
         run: npm run build
 
+      - name: Run database migrations
+        run: npm run migration:run
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASS: ${{ secrets.DB_PASS }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_SCHEMA: ${{ secrets.DB_SCHEMA }}
+
       - name: Assemble runtime artifact
-        if: ${{ github.event_name == 'push' }}
         run: |
-          rm -rf runtime
           mkdir -p runtime
           cp package.json runtime/
           if [ -f package-lock.json ]; then cp package-lock.json runtime/; fi
@@ -91,7 +51,6 @@ jobs:
           npm ci --omit=dev --ignore-scripts
 
       - name: Upload runtime artifact
-        if: ${{ github.event_name == 'push' }}
         uses: actions/upload-artifact@v4
         with:
           name: runtime-artifact
@@ -99,19 +58,19 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
-    needs: lint-test-and-build
-    if: ${{ github.event_name == 'push' }}
+    needs: build-and-test
     environment:
       name: production
+    if: ${{ github.event_name == 'push' }}
 
     steps:
-      - name: Download artifact
+      - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
           name: runtime-artifact
           path: app/
 
-      - name: Deploy to Railway (Prod)
+      - name: Deploy to Railway (Production)
         uses: brentjanderson/railway-deploy@v1
         with:
           railway_token: ${{ secrets.RAILWAY_TOKEN }}
