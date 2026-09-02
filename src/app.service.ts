@@ -1,7 +1,7 @@
 import { Injectable, OnApplicationBootstrap, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import { UserEntity } from './modules/users/entities/user.entity';
 import { PartnerEntity } from './modules/partners/entities/partner.entity';
 import { ExamEntity } from './modules/exams/entities/exam.entity';
