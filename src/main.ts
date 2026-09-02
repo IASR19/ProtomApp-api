@@ -19,7 +19,10 @@ async function bootstrap() {
     }),
   );
 
-  app.enableCors({ origin: '*' });
+  app.enableCors({
+    origin: true,
+    credentials: true,
+  });
 
   const config = new DocumentBuilder()
     .setTitle('ProtomApp API')

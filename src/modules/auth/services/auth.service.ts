@@ -1,4 +1,5 @@
 import { Injectable, UnauthorizedException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -24,6 +25,7 @@ export class AuthService {
     private readonly usersRepository: Repository<UserEntity>,
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
+    private readonly configService: ConfigService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -119,34 +121,8 @@ export class AuthService {
     };
   }
 
-  async loginWithGoogle(idToken: string) {
-    let email: string;
-    let name: string;
-    let googleId: string;
-
-    if (idToken.startsWith('mock-')) {
-      email = idToken.replace('mock-', '');
-      name = email.split('@')[0];
-      googleId = `google-${name}`;
-    } else {
-      try {
-        const ticket = await this.googleClient.verifyIdToken({
-          idToken,
-        });
-        const payload = ticket.getPayload();
-        if (!payload) {
-          throw new UnauthorizedException('Token do Google inválido.');
-        }
-        email = payload.email!;
-        name = payload.name || email.split('@')[0];
-        googleId = payload.sub;
-      } catch (error) {
-        this.logger.warn(`Validação real do Google falhou: ${error.message}. Utilizando fallback mock.`);
-        email = idToken.includes('@') ? idToken : 'google-user@email.com';
-        name = email.split('@')[0];
-        googleId = `mock-google-id-${name}`;
-      }
-    }
+  async loginWithGoogle(googleToken: string) {
+    const { email, name, googleId } = await this.resolveGoogleProfile(googleToken);
 
     let isNewUser = false;
     let user = await this.usersRepository.findOne({ where: { googleId } });
@@ -165,6 +141,7 @@ export class AuthService {
           passwordHash,
           googleId,
           isEmailVerified: true,
+          plan: 'Premium',
         });
         user = await this.usersRepository.save(user);
       }
@@ -182,6 +159,130 @@ export class AuthService {
         email: user.email,
         plan: user.plan,
       },
+    };
+  }
+
+  private getGoogleAudiences(): string[] {
+    const raw =
+      this.configService.get<string>('GOOGLE_CLIENT_IDS') ||
+      this.configService.get<string>('GOOGLE_CLIENT_ID') ||
+      '';
+    return raw
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+  }
+
+  private async resolveGoogleProfile(token: string): Promise<{
+    email: string;
+    name: string;
+    googleId: string;
+  }> {
+    const audiences = this.getGoogleAudiences();
+    if (!audiences.length) {
+      throw new UnauthorizedException('Login com Google não está configurado no servidor.');
+    }
+
+    const isJwt = token.split('.').length === 3;
+    if (isJwt) {
+      return this.resolveGoogleIdToken(token, audiences);
+    }
+
+    return this.resolveGoogleAccessToken(token, audiences);
+  }
+
+  private async resolveGoogleIdToken(
+    idToken: string,
+    audiences: string[],
+  ): Promise<{ email: string; name: string; googleId: string }> {
+    try {
+      const ticket = await this.googleClient.verifyIdToken({
+        idToken,
+        audience: audiences,
+      });
+      const payload = ticket.getPayload();
+      if (!payload?.email || !payload.sub) {
+        throw new UnauthorizedException('A conta Google não compartilhou o e-mail.');
+      }
+      if (payload.email_verified === false) {
+        throw new UnauthorizedException('O e-mail da conta Google não está verificado.');
+      }
+      return {
+        email: payload.email,
+        name: payload.name || payload.email.split('@')[0],
+        googleId: payload.sub,
+      };
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      this.logger.warn(`ID token Google inválido: ${(error as Error).message}`);
+      throw new UnauthorizedException('Token do Google inválido ou expirado.');
+    }
+  }
+
+  private async resolveGoogleAccessToken(
+    accessToken: string,
+    audiences: string[],
+  ): Promise<{ email: string; name: string; googleId: string }> {
+    const tokenInfoRes = await fetch(
+      `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(accessToken)}`,
+    );
+    if (!tokenInfoRes.ok) {
+      throw new UnauthorizedException('Token do Google inválido ou expirado.');
+    }
+
+    const info = (await tokenInfoRes.json()) as {
+      aud?: string;
+      azp?: string;
+      email?: string;
+      email_verified?: string | boolean;
+      sub?: string;
+      name?: string;
+    };
+
+    const tokenAudience = [info.azp, info.aud].filter(Boolean) as string[];
+    if (!tokenAudience.some((value) => audiences.includes(value))) {
+      throw new UnauthorizedException('Token do Google não pertence a este aplicativo.');
+    }
+
+    let email = info.email;
+    let googleId = info.sub;
+    let name = info.name;
+    let verified = info.email_verified === true || info.email_verified === 'true';
+
+    if (!email || !googleId || !name) {
+      const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!userInfoRes.ok) {
+        throw new UnauthorizedException('A conta Google não compartilhou o e-mail.');
+      }
+      const profile = (await userInfoRes.json()) as {
+        email?: string;
+        sub?: string;
+        name?: string;
+        email_verified?: boolean;
+      };
+      email = email || profile.email;
+      googleId = googleId || profile.sub;
+      name = name || profile.name;
+      if (profile.email_verified) {
+        verified = true;
+      }
+    }
+
+    if (!email || !googleId) {
+      throw new UnauthorizedException('A conta Google não compartilhou o e-mail.');
+    }
+    if (!verified) {
+      throw new UnauthorizedException('O e-mail da conta Google não está verificado.');
+    }
+
+    return {
+      email,
+      name: name || email.split('@')[0],
+      googleId,
     };
   }
 

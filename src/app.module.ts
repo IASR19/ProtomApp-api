@@ -1,6 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { CreateInitialTables1781652526112 } from './migrations/1781652526112-CreateInitialTables';
+import { AddEmailVerificationAndSocialFields1781652888767 } from './migrations/1781652888767-AddEmailVerificationAndSocialFields';
+import { AlterUserHeightPrecision1781656516762 } from './migrations/1781656516762-AlterUserHeightPrecision';
+import { EnsureUserAuthColumns1788373230170 } from './migrations/1788373230170-EnsureUserAuthColumns';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UsersModule } from './modules/users/users.module';
@@ -28,18 +32,30 @@ import { MealEntity } from './modules/nutrition/entities/meal.entity';
     ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (config: ConfigService) => ({
-        type: 'postgres',
-        host: config.get('DB_HOST', 'localhost'),
-        port: config.get<number>('DB_PORT', 5432),
-        username: config.get('DB_USER', 'postgres'),
-        password: config.get('DB_PASS', 'postgres'),
-        database: config.get('DB_NAME', 'protomapp'),
-        schema: config.get('DB_SCHEMA', 'app'),
-        entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        synchronize: config.get('NODE_ENV') !== 'production',
-        logging: config.get('NODE_ENV') === 'development',
-      }),
+      useFactory: (config: ConfigService) => {
+        const isProd = config.get('NODE_ENV') === 'production';
+        const dbSsl = config.get('DB_SSL') === 'true';
+        return {
+          type: 'postgres' as const,
+          host: config.get<string>('DB_HOST', 'localhost'),
+          port: parseInt(String(config.get('DB_PORT', 5432)), 10),
+          username: config.get<string>('DB_USER', 'postgres'),
+          password: config.get<string>('DB_PASS', 'postgres'),
+          database: config.get<string>('DB_NAME', 'protomapp'),
+          schema: config.get<string>('DB_SCHEMA', 'app'),
+          entities: [__dirname + '/**/*.entity{.ts,.js}'],
+          migrations: [
+            CreateInitialTables1781652526112,
+            AddEmailVerificationAndSocialFields1781652888767,
+            AlterUserHeightPrecision1781656516762,
+            EnsureUserAuthColumns1788373230170,
+          ],
+          synchronize: !isProd,
+          migrationsRun: isProd,
+          logging: config.get('NODE_ENV') === 'development',
+          ssl: dbSsl ? { rejectUnauthorized: false } : false,
+        };
+      },
       inject: [ConfigService],
     }),
     TypeOrmModule.forFeature([

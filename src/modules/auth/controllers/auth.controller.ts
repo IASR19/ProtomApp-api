@@ -12,11 +12,12 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   private setCookie(res: Response, refreshToken: string) {
+    const isProd = process.env.NODE_ENV === 'production';
     res.cookie('ps_refresh_token', refreshToken, {
       httpOnly: true,
-      secure: false, // should be true in prod if using https
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
   }
 
