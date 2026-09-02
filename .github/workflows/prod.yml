@@ -89,14 +89,13 @@ jobs:
     if: ${{ github.event_name == 'push' }}
 
     steps:
-      - name: Download build artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: runtime-artifact
-          path: app/
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm i -g @railway/cli
 
       - name: Deploy to Railway (Production)
-        uses: brentjanderson/railway-deploy@v1
-        with:
-          railway_token: ${{ secrets.RAILWAY_TOKEN }}
-          service: ${{ secrets.RAILWAY_SERVICE_NAME }}
+        run: railway up --service ${{ secrets.RAILWAY_SERVICE_NAME }}
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
