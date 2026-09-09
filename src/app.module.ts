@@ -5,6 +5,7 @@ import { CreateInitialTables1781652526112 } from './migrations/1781652526112-Cre
 import { AddEmailVerificationAndSocialFields1781652888767 } from './migrations/1781652888767-AddEmailVerificationAndSocialFields';
 import { AlterUserHeightPrecision1781656516762 } from './migrations/1781656516762-AlterUserHeightPrecision';
 import { EnsureUserAuthColumns1788373230170 } from './migrations/1788373230170-EnsureUserAuthColumns';
+import { AddMealDescriptionColumn1788969608766 } from './migrations/1788969608766-AddMealDescriptionColumn';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UsersModule } from './modules/users/users.module';
@@ -49,6 +50,7 @@ import { MealEntity } from './modules/nutrition/entities/meal.entity';
             AddEmailVerificationAndSocialFields1781652888767,
             AlterUserHeightPrecision1781656516762,
             EnsureUserAuthColumns1788373230170,
+            AddMealDescriptionColumn1788969608766,
           ],
           synchronize: !isProd,
           migrationsRun: isProd,
