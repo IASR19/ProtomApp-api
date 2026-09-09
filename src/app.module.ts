@@ -6,6 +6,7 @@ import { AddEmailVerificationAndSocialFields1781652888767 } from './migrations/1
 import { AlterUserHeightPrecision1781656516762 } from './migrations/1781656516762-AlterUserHeightPrecision';
 import { EnsureUserAuthColumns1788373230170 } from './migrations/1788373230170-EnsureUserAuthColumns';
 import { AddMealDescriptionColumn1788969608766 } from './migrations/1788969608766-AddMealDescriptionColumn';
+import { CreateDailyCheckins1788971421891 } from './migrations/1788971421891-CreateDailyCheckins';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UsersModule } from './modules/users/users.module';
@@ -17,6 +18,7 @@ import { NutritionModule } from './modules/nutrition/nutrition.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
 import { PartnersModule } from './modules/partners/partners.module';
 import { ChatbotModule } from './modules/chatbot/chatbot.module';
+import { WellnessModule } from './modules/wellness/wellness.module';
 
 // Import all entities for app-level seeding in AppService
 import { UserEntity } from './modules/users/entities/user.entity';
@@ -27,6 +29,7 @@ import { PrescriptionEntity } from './modules/prescriptions/entities/prescriptio
 import { WorkoutEntity } from './modules/workout/entities/workout.entity';
 import { WorkoutExerciseEntity } from './modules/workout/entities/workout-exercise.entity';
 import { MealEntity } from './modules/nutrition/entities/meal.entity';
+import { DailyCheckinEntity } from './modules/wellness/entities/daily-checkin.entity';
 
 @Module({
   imports: [
@@ -51,6 +54,7 @@ import { MealEntity } from './modules/nutrition/entities/meal.entity';
             AlterUserHeightPrecision1781656516762,
             EnsureUserAuthColumns1788373230170,
             AddMealDescriptionColumn1788969608766,
+            CreateDailyCheckins1788971421891,
           ],
           synchronize: !isProd,
           migrationsRun: isProd,
@@ -69,6 +73,7 @@ import { MealEntity } from './modules/nutrition/entities/meal.entity';
       WorkoutEntity,
       WorkoutExerciseEntity,
       MealEntity,
+      DailyCheckinEntity,
     ]),
     UsersModule,
     AuthModule,
@@ -79,6 +84,7 @@ import { MealEntity } from './modules/nutrition/entities/meal.entity';
     PrescriptionsModule,
     PartnersModule,
     ChatbotModule,
+    WellnessModule,
   ],
   controllers: [AppController],
   providers: [AppService],

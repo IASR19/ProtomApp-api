@@ -6,6 +6,7 @@ import { UpdateUserDto } from '../dto/update-user.dto';
 import { ProtocolEntity } from '../../protocol/entities/protocol.entity';
 import { WorkoutEntity } from '../../workout/entities/workout.entity';
 import { MealEntity } from '../../nutrition/entities/meal.entity';
+import { WellnessService } from '../../wellness/services/wellness.service';
 
 @Injectable()
 export class UsersService {
@@ -18,6 +19,7 @@ export class UsersService {
     private readonly workoutRepository: Repository<WorkoutEntity>,
     @InjectRepository(MealEntity)
     private readonly mealsRepository: Repository<MealEntity>,
+    private readonly wellnessService: WellnessService,
   ) {}
 
   async findOne(id: string): Promise<UserEntity> {
@@ -36,11 +38,11 @@ export class UsersService {
 
   async getBodyScan(userId: string) {
     const user = await this.findOne(userId);
-    
+
     // Heuristic calculations based on user metrics for the static 3D scan
     const weight = Number(user.weight) || 80;
     const height = Number(user.height) || 1.75;
-    
+
     // Body fat percentage estimate (heuristic formula for demonstration)
     let bodyFat = 20;
     if (user.sex?.toLowerCase() === 'feminino') {
@@ -48,7 +50,7 @@ export class UsersService {
     } else {
       bodyFat = Math.round((weight / (height * height)) * 1.1 - 4);
     }
-    
+
     const leanMass = Math.round(weight * (1 - bodyFat / 100));
 
     return {
@@ -68,7 +70,7 @@ export class UsersService {
 
   async getDashboard(userId: string) {
     const user = await this.findOne(userId);
-    
+
     // 1. Fetch active protocol and adherence
     const protocol = await this.protocolsRepository.findOne({
       where: { userId, isActive: true },
@@ -77,21 +79,24 @@ export class UsersService {
 
     let protocolProgress = 0;
     let adherence = 0;
-    let recovery = 85;
-    let sleepValue = '7.5h';
-    let sleepHrs = 7.5;
-    
+
     if (protocol) {
-      recovery = protocol.recovery ?? 85;
-      sleepValue = protocol.sleep || '7.5h';
-      sleepHrs = parseFloat(sleepValue.replace('h', '.')) || 7.5;
-      
       if (protocol.tasks && protocol.tasks.length > 0) {
-        const doneTasks = protocol.tasks.filter(t => t.done).length;
-        protocolProgress = Math.round((doneTasks / protocol.tasks.length) * 100);
+        const doneTasks = protocol.tasks.filter((t) => t.done).length;
+        protocolProgress = Math.round(
+          (doneTasks / protocol.tasks.length) * 100,
+        );
         adherence = protocolProgress;
       }
     }
+
+    // Sono e recuperação vêm do check-in diário autorreportado pelo usuário
+    // (não há integração com wearable ainda — ver docs/wearable-data-strategy.md).
+    const checkin = await this.wellnessService.getTodayCheckin(userId);
+    const hasCheckin = !!checkin;
+    const sleepHrs = checkin ? Number(checkin.sleepHours) : 0;
+    const sleepScoreFromCheckin = checkin ? checkin.sleepScore : 0;
+    const recovery = checkin ? checkin.recoveryScore : 0;
 
     // 2. Fetch meals to sum total and goal kcal
     const meals = await this.mealsRepository.find({ where: { userId } });
@@ -106,19 +111,91 @@ export class UsersService {
     const workout = await this.workoutRepository.findOne({ where: { userId } });
     const trainingStatus = workout ? workout.title : 'Sem Treino';
 
-    // 4. Calculate weight delta (current - initial)
+    // 4. Calculate weight delta (current - initial) and % of the real goal reached
     const currentWeight = Number(user.weight) || 80;
     const initialWeight = Number(user.initialWeight) || currentWeight;
+    const goalWeight = Number(user.goalWeight) || initialWeight;
     const weightProgress = Number((currentWeight - initialWeight).toFixed(1));
+    const weightGoalRange = initialWeight - goalWeight;
+    const weightProgressPercent =
+      weightGoalRange !== 0
+        ? Math.min(
+            100,
+            Math.max(
+              0,
+              Math.round(
+                ((initialWeight - currentWeight) / weightGoalRange) * 100,
+              ),
+            ),
+          )
+        : 0;
 
-    // 5. Calculate Metabolic Score dynamically
-    const sleepScore = Math.round(Math.min(100, (sleepHrs / 8) * 100));
-    const metabolicScore = Math.round(
-      adherence * 0.4 + 
-      recovery * 0.3 + 
-      sleepScore * 0.2 + 
-      90 * 0.1
-    );
+    // 5. Calculate Metabolic Score dynamically.
+    // Sem check-in de hoje, não inventamos sono/recuperação: redistribuímos o
+    // peso desses dois componentes (50%) para aderência e exames, em vez de
+    // usar um valor padrão fixo como se fosse medição real.
+    const metabolicScore = hasCheckin
+      ? Math.round(
+          adherence * 0.4 +
+            recovery * 0.3 +
+            sleepScoreFromCheckin * 0.2 +
+            90 * 0.1,
+        )
+      : Math.round(adherence * 0.8 + 90 * 0.2);
+
+    const alerts: any[] = [
+      {
+        id: '1',
+        level: adherence < 80 ? 'warning' : 'success',
+        category: 'adherence',
+        title:
+          adherence < 80
+            ? 'Aderência ao Protocolo Baixa'
+            : 'Aderência Saudável',
+        description:
+          adherence < 80
+            ? `Sua aderência está em ${adherence}%, abaixo do ideal de 80%.`
+            : `Sua aderência está excelente em ${adherence}%. Parabéns!`,
+        metric: 'Aderência',
+        value: `${adherence}%`,
+        expectedRange: '≥ 80%',
+        recommendation:
+          adherence < 80
+            ? 'Tente marcar todas as tarefas do protocolo diário. Use lembretes para os horários importantes.'
+            : 'Continue com a consistência de tarefas para sustentar seus resultados!',
+      },
+    ];
+
+    if (hasCheckin) {
+      alerts.push({
+        id: '2',
+        level: sleepHrs < 7 ? 'warning' : 'success',
+        category: 'wellness',
+        title: sleepHrs < 7 ? 'Duração do Sono Insuficiente' : 'Sono Reparador',
+        description: `Segundo seu check-in de hoje, você dormiu ${sleepHrs}h.`,
+        metric: 'Sono',
+        value: `${sleepHrs}h`,
+        expectedRange: '7-9 horas',
+        recommendation:
+          sleepHrs < 7
+            ? 'Mantenha uma rotina consistente de sono. Evite telas 1 hora antes de dormir.'
+            : 'Sua janela de sono está adequada para regeneração metabólica.',
+      });
+    } else {
+      alerts.push({
+        id: '2',
+        level: 'info',
+        category: 'wellness',
+        title: 'Faça seu check-in de hoje',
+        description:
+          'Sono e recuperação ainda não foram registrados hoje — isso deixa seu Score Metabólico incompleto.',
+        metric: 'Check-in',
+        value: 'Pendente',
+        expectedRange: '1x por dia',
+        recommendation:
+          'Leva menos de 1 minuto: informe horas de sono e como você está se sentindo hoje.',
+      });
+    }
 
     return {
       metabolicScore,
@@ -131,44 +208,23 @@ export class UsersService {
       criticalAlerts: adherence < 60 ? 1 : 0,
       metabolicScoreDetails: {
         protocolAdherence: adherence,
-        wearableData: {
-          sleep: sleepHrs,
-          recovery,
-          avgHeartRate: 68,
-        },
-        weightProgress: Math.min(100, Math.round((weightProgress / -10) * 100)) || 50, // mock percentage of target weight loss
+        wellness: hasCheckin
+          ? {
+              hasCheckin: true,
+              sleepHours: sleepHrs,
+              sleepScore: sleepScoreFromCheckin,
+              recoveryScore: recovery,
+            }
+          : {
+              hasCheckin: false,
+              sleepHours: 0,
+              sleepScore: 0,
+              recoveryScore: 0,
+            },
+        weightProgress: weightProgressPercent,
         examsStatus: 90,
       },
-      alerts: [
-        {
-          id: '1',
-          level: adherence < 80 ? 'warning' : 'success',
-          category: 'adherence',
-          title: adherence < 80 ? 'Aderência ao Protocolo Baixa' : 'Aderência Saudável',
-          description: adherence < 80
-            ? `Sua aderência está em ${adherence}%, abaixo do ideal de 80%.`
-            : `Sua aderência está excelente em ${adherence}%. Parabéns!`,
-          metric: 'Aderência',
-          value: `${adherence}%`,
-          expectedRange: '≥ 80%',
-          recommendation: adherence < 80
-            ? 'Tente marcar todas as tarefas do protocolo diário. Use lembretes para os horários importantes.'
-            : 'Continue com a consistência de tarefas para sustentar seus resultados!',
-        },
-        {
-          id: '2',
-          level: sleepHrs < 7 ? 'warning' : 'success',
-          category: 'wearable',
-          title: sleepHrs < 7 ? 'Duração do Sono Insuficiente' : 'Sono Reparador',
-          description: `Você registrou ${sleepHrs} horas de sono na noite passada.`,
-          metric: 'Sono',
-          value: `${sleepHrs}h`,
-          expectedRange: '7-9 horas',
-          recommendation: sleepHrs < 7
-            ? 'Mantenha uma rotina consistente de sono. Evite telas 1 hora antes de dormir.'
-            : 'Sua janela de sono está adequada para regeneração metabólica.',
-        },
-      ],
+      alerts,
     };
   }
 }

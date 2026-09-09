@@ -6,9 +6,18 @@ import { WorkoutEntity } from '../workout/entities/workout.entity';
 import { MealEntity } from '../nutrition/entities/meal.entity';
 import { UsersService } from './services/users.service';
 import { UsersController } from './controllers/users.controller';
+import { WellnessModule } from '../wellness/wellness.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([UserEntity, ProtocolEntity, WorkoutEntity, MealEntity])],
+  imports: [
+    TypeOrmModule.forFeature([
+      UserEntity,
+      ProtocolEntity,
+      WorkoutEntity,
+      MealEntity,
+    ]),
+    WellnessModule,
+  ],
   controllers: [UsersController],
   providers: [UsersService],
   exports: [TypeOrmModule, UsersService],
