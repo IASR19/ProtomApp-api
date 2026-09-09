@@ -27,6 +27,7 @@ export class CreateDailyCheckins1788971421891 implements MigrationInterface {
                 ALTER TABLE "daily_checkins" ADD CONSTRAINT "UQ_daily_checkins_userId_date" UNIQUE ("userId", "date");
             EXCEPTION
                 WHEN duplicate_object THEN NULL;
+                WHEN duplicate_table THEN NULL;
             END $$;
         `);
         await queryRunner.query(`
@@ -34,6 +35,7 @@ export class CreateDailyCheckins1788971421891 implements MigrationInterface {
                 ALTER TABLE "daily_checkins" ADD CONSTRAINT "FK_daily_checkins_userId" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
             EXCEPTION
                 WHEN duplicate_object THEN NULL;
+                WHEN duplicate_table THEN NULL;
             END $$;
         `);
     }
