@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserEntity } from '../entities/user.entity';
@@ -7,9 +7,24 @@ import { ProtocolEntity } from '../../protocol/entities/protocol.entity';
 import { WorkoutEntity } from '../../workout/entities/workout.entity';
 import { MealEntity } from '../../nutrition/entities/meal.entity';
 import { WellnessService } from '../../wellness/services/wellness.service';
+import { ExamsService } from '../../exams/services/exams.service';
+import { BodyScanSnapshotEntity } from '../entities/body-scan-snapshot.entity';
+import { MedicalTeamMemberEntity } from '../entities/medical-team-member.entity';
+import { UpdateNotificationPreferencesDto } from '../dto/update-notification-preferences.dto';
+
+// ExamEntity.date é armazenado como varchar "dd/mm/yyyy" (sem validação a nível de banco).
+function parseBrDate(dateStr: string): Date | null {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(dateStr?.trim() ?? '');
+  if (!match) return null;
+  const [, day, month, year] = match;
+  const date = new Date(Number(year), Number(month) - 1, Number(day));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @InjectRepository(UserEntity)
     private readonly usersRepository: Repository<UserEntity>,
@@ -19,8 +34,49 @@ export class UsersService {
     private readonly workoutRepository: Repository<WorkoutEntity>,
     @InjectRepository(MealEntity)
     private readonly mealsRepository: Repository<MealEntity>,
+    @InjectRepository(BodyScanSnapshotEntity)
+    private readonly bodyScanRepository: Repository<BodyScanSnapshotEntity>,
+    @InjectRepository(MedicalTeamMemberEntity)
+    private readonly medicalTeamRepository: Repository<MedicalTeamMemberEntity>,
     private readonly wellnessService: WellnessService,
+    private readonly examsService: ExamsService,
   ) {}
+
+  async getMedicalTeam(userId: string): Promise<MedicalTeamMemberEntity[]> {
+    return this.medicalTeamRepository.find({ where: { userId }, order: { name: 'ASC' } });
+  }
+
+  async updateNotificationPreferences(userId: string, dto: UpdateNotificationPreferencesDto) {
+    const user = await this.findOne(userId);
+    Object.assign(user, dto);
+    const saved = await this.usersRepository.save(user);
+    return {
+      notifyPush: saved.notifyPush,
+      notifyEmail: saved.notifyEmail,
+      notifyProtocolReminders: saved.notifyProtocolReminders,
+      notifyExamAlerts: saved.notifyExamAlerts,
+    };
+  }
+
+  async getPlan(userId: string) {
+    const user = await this.findOne(userId);
+    return {
+      plan: user.plan,
+      planRenewalDate: user.planRenewalDate,
+      planCancelled: user.planCancelled,
+    };
+  }
+
+  async cancelPlan(userId: string) {
+    const user = await this.findOne(userId);
+    user.planCancelled = true;
+    const saved = await this.usersRepository.save(user);
+    return {
+      plan: saved.plan,
+      planRenewalDate: saved.planRenewalDate,
+      planCancelled: saved.planCancelled,
+    };
+  }
 
   async findOne(id: string): Promise<UserEntity> {
     const user = await this.usersRepository.findOne({ where: { id } });
@@ -36,36 +92,91 @@ export class UsersService {
     return this.usersRepository.save(user);
   }
 
-  async getBodyScan(userId: string) {
-    const user = await this.findOne(userId);
-
-    // Heuristic calculations based on user metrics for the static 3D scan
+  // Heuristic calculations based on user metrics (não há bioimpedância/scanner real integrado ainda).
+  private computeCurrentBodyMetrics(user: UserEntity) {
     const weight = Number(user.weight) || 80;
     const height = Number(user.height) || 1.75;
 
-    // Body fat percentage estimate (heuristic formula for demonstration)
     let bodyFat = 20;
     if (user.sex?.toLowerCase() === 'feminino') {
       bodyFat = Math.round((weight / (height * height)) * 1.1 + 5);
     } else {
       bodyFat = Math.round((weight / (height * height)) * 1.1 - 4);
     }
+    bodyFat = Math.max(5, Math.min(bodyFat, 50));
 
+    const visceralFat = Math.round(bodyFat * 0.6);
+    const waist = Math.round(weight * 0.9);
     const leanMass = Math.round(weight * (1 - bodyFat / 100));
 
+    return { bodyFat, visceralFat, weight, waist, leanMass };
+  }
+
+  private buildBodyScanResponse(
+    current: ReturnType<UsersService['computeCurrentBodyMetrics']>,
+    previousSnapshot: BodyScanSnapshotEntity | undefined,
+    capturedAt: Date,
+  ) {
+    if (!previousSnapshot) {
+      return { ...current, capturedAt, hasHistory: false };
+    }
+
+    const round1 = (n: number) => Math.round(n * 10) / 10;
+
     return {
-      bodyFat: Math.max(5, Math.min(bodyFat, 50)),
-      bodyFatDelta: -2.1,
-      visceralFat: 12,
-      visceralFatDelta: -1,
-      weight: weight,
-      weightDelta: -5.0,
-      waist: Math.round(weight * 0.9), // rough estimate
-      waistDelta: -4,
-      leanMass: leanMass,
-      leanMassDelta: 0,
-      comparisonLabel: 'Comparativo: Mês 1 vs Mês 2',
+      ...current,
+      bodyFatDelta: round1(current.bodyFat - Number(previousSnapshot.bodyFat)),
+      visceralFatDelta: round1(current.visceralFat - Number(previousSnapshot.visceralFat)),
+      weightDelta: round1(current.weight - Number(previousSnapshot.weight)),
+      waistDelta: round1(current.waist - Number(previousSnapshot.waist)),
+      leanMassDelta: round1(current.leanMass - Number(previousSnapshot.leanMass)),
+      capturedAt,
+      hasHistory: true,
+      previousCapturedAt: previousSnapshot.capturedAt,
     };
+  }
+
+  /** Leitura pura — não grava nada, só compara a métrica atual com o snapshot mais recente já existente. */
+  async getBodyScan(userId: string) {
+    const user = await this.findOne(userId);
+    const current = this.computeCurrentBodyMetrics(user);
+
+    const latestSnapshot = await this.bodyScanRepository.findOne({
+      where: { userId },
+      order: { capturedAt: 'DESC' },
+    });
+
+    return this.buildBodyScanResponse(current, latestSnapshot ?? undefined, new Date());
+  }
+
+  /** Registra (ou atualiza, se já houver um hoje) o snapshot do dia — ação explícita, não efeito colateral de GET. */
+  async recordBodyScan(userId: string) {
+    const user = await this.findOne(userId);
+    const current = this.computeCurrentBodyMetrics(user);
+
+    const recentSnapshots = await this.bodyScanRepository.find({
+      where: { userId },
+      order: { capturedAt: 'DESC' },
+      take: 2,
+    });
+
+    const now = new Date();
+    const isSameDay = (a: Date, b: Date) =>
+      a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+    const todaysSnapshot = recentSnapshots.find((s) => isSameDay(new Date(s.capturedAt), now));
+    const previousSnapshot = recentSnapshots.find((s) => s !== todaysSnapshot);
+
+    if (todaysSnapshot) {
+      Object.assign(todaysSnapshot, current, { capturedAt: now });
+      await this.bodyScanRepository.save(todaysSnapshot);
+    } else {
+      await this.bodyScanRepository.save(
+        this.bodyScanRepository.create({ userId, ...current, capturedAt: now }),
+      );
+    }
+
+    return this.buildBodyScanResponse(current, previousSnapshot, now);
   }
 
   async getDashboard(userId: string) {
@@ -110,6 +221,32 @@ export class UsersService {
     // 3. Fetch workout to determine training status
     const workout = await this.workoutRepository.findOne({ where: { userId } });
     const trainingStatus = workout ? workout.title : 'Sem Treino';
+
+    // 3b. Próximo exame agendado e status geral dos exames, a partir de dados reais.
+    const exams = await this.examsService.listExams(userId);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const upcomingDaysList = exams
+      .map((exam) => parseBrDate(exam.date))
+      .filter((date): date is Date => {
+        if (!date) {
+          this.logger.warn(`Data de exame em formato inválido para userId=${userId}`);
+          return false;
+        }
+        return date.getTime() >= today.getTime();
+      })
+      .map((date) => Math.ceil((date.getTime() - today.getTime()) / 86400000));
+    const nextExamDays = upcomingDaysList.length ? Math.min(...upcomingDaysList) : null;
+
+    const evolutions = await this.examsService.getEvolution(userId);
+    const examsStatus = evolutions.length
+      ? Math.round(
+          evolutions.reduce((sum, e) => {
+            const score = e.status === 'normal' ? 100 : e.status === 'alerta' ? 60 : 20;
+            return sum + score;
+          }, 0) / evolutions.length,
+        )
+      : null;
 
     // 4. Calculate weight delta (current - initial) and % of the real goal reached
     const currentWeight = Number(user.weight) || 80;
@@ -203,7 +340,7 @@ export class UsersService {
       trainingStatus,
       nutritionKcal,
       nutritionGoal,
-      nextExamDays: 12,
+      nextExamDays,
       weightProgress,
       criticalAlerts: adherence < 60 ? 1 : 0,
       metabolicScoreDetails: {
@@ -222,7 +359,7 @@ export class UsersService {
               recoveryScore: 0,
             },
         weightProgress: weightProgressPercent,
-        examsStatus: 90,
+        examsStatus,
       },
       alerts,
     };

@@ -54,6 +54,30 @@ export class UserEntity extends BaseEntity {
   plan: string;
 
   @ApiProperty()
+  @Column({ type: 'date', nullable: true })
+  planRenewalDate: string | null;
+
+  @ApiProperty()
+  @Column({ type: 'boolean', default: false })
+  planCancelled: boolean;
+
+  @ApiProperty()
+  @Column({ type: 'boolean', default: true })
+  notifyPush: boolean;
+
+  @ApiProperty()
+  @Column({ type: 'boolean', default: true })
+  notifyEmail: boolean;
+
+  @ApiProperty()
+  @Column({ type: 'boolean', default: true })
+  notifyProtocolReminders: boolean;
+
+  @ApiProperty()
+  @Column({ type: 'boolean', default: true })
+  notifyExamAlerts: boolean;
+
+  @ApiProperty()
   @Column({ type: 'boolean', default: false })
   disclaimerAccepted: boolean;
 

@@ -7,6 +7,8 @@ import { AlterUserHeightPrecision1781656516762 } from './migrations/178165651676
 import { EnsureUserAuthColumns1788373230170 } from './migrations/1788373230170-EnsureUserAuthColumns';
 import { AddMealDescriptionColumn1788969608766 } from './migrations/1788969608766-AddMealDescriptionColumn';
 import { CreateDailyCheckins1788971421891 } from './migrations/1788971421891-CreateDailyCheckins';
+import { CreateBodyScanSnapshots1789431421762 } from './migrations/1789431421762-CreateBodyScanSnapshots';
+import { AddProfileFeatureFields1789431630294 } from './migrations/1789431630294-AddProfileFeatureFields';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UsersModule } from './modules/users/users.module';
@@ -19,6 +21,8 @@ import { PrescriptionsModule } from './modules/prescriptions/prescriptions.modul
 import { PartnersModule } from './modules/partners/partners.module';
 import { ChatbotModule } from './modules/chatbot/chatbot.module';
 import { WellnessModule } from './modules/wellness/wellness.module';
+import { GroqModule } from './common/groq/groq.module';
+import { OpenAiModule } from './common/openai/openai.module';
 
 // Import all entities for app-level seeding in AppService
 import { UserEntity } from './modules/users/entities/user.entity';
@@ -34,6 +38,8 @@ import { DailyCheckinEntity } from './modules/wellness/entities/daily-checkin.en
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    GroqModule,
+    OpenAiModule,
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => {
@@ -55,6 +61,8 @@ import { DailyCheckinEntity } from './modules/wellness/entities/daily-checkin.en
             EnsureUserAuthColumns1788373230170,
             AddMealDescriptionColumn1788969608766,
             CreateDailyCheckins1788971421891,
+            CreateBodyScanSnapshots1789431421762,
+            AddProfileFeatureFields1789431630294,
           ],
           synchronize: !isProd,
           migrationsRun: isProd,

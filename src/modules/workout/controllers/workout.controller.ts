@@ -71,7 +71,8 @@ export class WorkoutController {
   @Get('today')
   async getTodayWorkout(@Req() req: Request) {
     const user = req.user as any;
-    return this.workoutService.getTodayWorkout(user.id);
+    const workout = await this.workoutService.getTodayWorkout(user.id);
+    return { hasData: !!workout, workout: workout ?? null };
   }
 
   @ApiOperation({ summary: 'Registrar ou atualizar treino do dia' })

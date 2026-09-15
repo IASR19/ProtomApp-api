@@ -1,9 +1,24 @@
-import { Controller, Get, Post, Body, UseGuards, Req } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiProperty } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
+  Req,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiProperty, ApiConsumes } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { NutritionService } from '../services/nutrition.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { IsNotEmpty, IsNumber, IsString, IsOptional } from 'class-validator';
+
+const MAX_MEAL_PHOTO_BYTES = 10 * 1024 * 1024;
+const ALLOWED_MEAL_PHOTO_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 class CreateMealDto {
   @ApiProperty({ example: 'Almoço Estratégico' })
@@ -68,7 +83,8 @@ export class NutritionController {
   @Get('last-meal')
   async getLastMeal(@Req() req: Request) {
     const user = req.user as any;
-    return this.nutritionService.getLastMeal(user.id);
+    const meal = await this.nutritionService.getLastMeal(user.id);
+    return { hasData: !!meal, meal: meal ?? null };
   }
 
   @ApiOperation({ summary: 'Registrar nova refeição com macronutrientes' })
@@ -88,5 +104,25 @@ export class NutritionController {
       dto.fatPercent,
       dto.description,
     );
+  }
+
+  @ApiOperation({ summary: 'Analisar foto de refeição via IA e registrar automaticamente' })
+  @ApiConsumes('multipart/form-data')
+  @Post('analyze-photo')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: MAX_MEAL_PHOTO_BYTES },
+      fileFilter: (_req, file, callback) => {
+        callback(null, ALLOWED_MEAL_PHOTO_MIME_TYPES.includes(file.mimetype));
+      },
+    }),
+  )
+  async analyzeMealPhoto(@Req() req: Request, @UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('Nenhuma imagem válida enviada. Envie uma foto em JPEG, PNG ou WEBP.');
+    }
+    const user = req.user as any;
+    return this.nutritionService.analyzeMealPhoto(user.id, file);
   }
 }

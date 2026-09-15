@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { GoogleGenAI } from '@google/genai';
+import { GroqService } from '../../../common/groq/groq.service';
 import { IsString, IsNumber, IsBoolean, IsArray, IsOptional, IsIn, IsNotEmpty } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { ProtocolEntity } from '../entities/protocol.entity';
@@ -38,6 +38,11 @@ export class GenerateProtocolDto {
   @IsNumber()
   weight: number;
 
+  @ApiProperty({ required: false, example: 80 })
+  @IsNumber()
+  @IsOptional()
+  goalWeight?: number;
+
   @ApiProperty({ example: 3 })
   @IsNumber()
   trainingFrequency: number;
@@ -70,6 +75,7 @@ export class ProtocolService {
     private readonly workoutRepository: Repository<WorkoutEntity>,
     @InjectRepository(MealEntity)
     private readonly mealsRepository: Repository<MealEntity>,
+    private readonly groqService: GroqService,
   ) {}
 
   async getActiveProtocol(userId: string): Promise<ProtocolEntity> {
@@ -142,20 +148,19 @@ export class ProtocolService {
       height: dto.height,
       weight: dto.weight,
       initialWeight: initialWeight,
+      // Só sobrescreve se o onboarding realmente coletou uma meta — nunca inventar um valor padrão.
+      ...(dto.goalWeight !== undefined ? { goalWeight: dto.goalWeight } : {}),
       objective: dto.objective === 'emagrecimento' ? 'Emagrecimento' : (dto.objective === 'hipertrofia' ? 'Hipertrofia' : 'Performance'),
       trainingFrequency: `${dto.trainingFrequency}x por semana`,
       disclaimerAccepted: true,
     });
 
     let aiData: any = null;
-    const apiKey = process.env.GEMINI_API_KEY;
 
-    if (apiKey) {
-      try {
-        Logger.log('Iniciando geração de protocolo via Gemini 2.5 API...', 'ProtocolService');
-        const ai = new GoogleGenAI({ apiKey });
-        
-        const prompt = `Você é um médico endocrinologista, especialista em medicina preventiva e nutricionista esportivo agindo como coach de saúde e longevidade do paciente.
+    if (this.groqService.isEnabled()) {
+      Logger.log('Iniciando geração de protocolo via Groq...', 'ProtocolService');
+
+      const prompt = `Você é um médico endocrinologista, especialista em medicina preventiva e nutricionista esportivo agindo como coach de saúde e longevidade do paciente.
 Gere um protocolo clínico, dieta personalizada e rotina de treinos de alta precisão para o seguinte paciente:
 - Idade: ${dto.age} anos
 - Sexo biológico: ${dto.sex}
@@ -203,7 +208,7 @@ Responda ESTRITAMENTE com um objeto JSON válido (sem qualquer formatação mark
   ],
   "protocol": {
     "version": "3.0",
-    "doctor": "Dr. James (IA Gemini)",
+    "doctor": "Dr. James (IA)",
     "crm": "CRM-SP 123456",
     "objective": "Objetivo do Protocolo (ex: Emagrecimento Otimizado + Queima Metabólica)",
     "sleep": "7h30", // apenas valor curto, ex: 7h30 ou 8h (slicing limit de 20 caracteres)
@@ -239,28 +244,15 @@ Responda ESTRITAMENTE com um objeto JSON válido (sem qualquer formatação mark
   }
 }`;
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: prompt,
-        });
-
-        let text = response.text?.trim() || '';
-        if (!text) {
-          throw new Error('Resposta do Gemini está vazia.');
-        }
-        if (text.startsWith('```')) {
-          text = text.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/```$/, '').trim();
-        }
-
-        aiData = JSON.parse(text);
-        Logger.log('Protocolo gerado com sucesso via Gemini 2.5.', 'ProtocolService');
-      } catch (err) {
-        Logger.error(`Erro ao gerar protocolo via Gemini API, usando fallback estruturado: ${err.message}`, err.stack, 'ProtocolService');
-        aiData = null;
+      aiData = await this.groqService.generateJson(prompt);
+      if (aiData) {
+        Logger.log('Protocolo gerado com sucesso via Groq.', 'ProtocolService');
+      } else {
+        Logger.warn('Falha ao gerar protocolo via Groq, usando fallback estruturado.', 'ProtocolService');
       }
     }
 
-    // Se o Gemini gerou os dados com sucesso, persistimos os dados gerados pela IA
+    // Se o Groq gerou os dados com sucesso, persistimos os dados gerados pela IA
     if (aiData && aiData.workout && aiData.meals && aiData.protocol) {
       // 3. Persist Workout
       await this.workoutRepository.delete({ userId });
@@ -348,7 +340,7 @@ Responda ESTRITAMENTE com um objeto JSON válido (sem qualquer formatação mark
       return this.protocolsRepository.save(protocol);
     }
 
-    // FALLBACK: Se o Gemini falhou ou não há chave API, usa a lógica determinística especialista local
+    // FALLBACK: Se o Groq falhou ou não há chave API, usa a lógica determinística especialista local
     // 3. Generate Workout Routine
     await this.workoutRepository.delete({ userId });
     

@@ -6,6 +6,7 @@ import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
+import appleSignin from 'apple-signin-auth';
 import { UserEntity } from '../../users/entities/user.entity';
 import { LoginDto, RegisterDto } from '../dto/auth.dto';
 import { MailService } from './mail.service';
@@ -54,6 +55,7 @@ export class AuthService {
 
     return {
       ...tokens,
+      needsProfileSetup: true,
       user: {
         id: savedUser.id,
         name: savedUser.name,
@@ -73,6 +75,7 @@ export class AuthService {
         passwordHash: true,
         plan: true,
         isEmailVerified: true,
+        objective: true,
       },
     });
 
@@ -94,6 +97,7 @@ export class AuthService {
 
     return {
       ...tokens,
+      needsProfileSetup: !user.objective,
       user: {
         id: user.id,
         name: user.name,
@@ -286,31 +290,56 @@ export class AuthService {
     };
   }
 
-  async loginWithApple(idToken: string) {
-    let email: string;
-    let name: string;
-    let appleId: string;
+  private isAppleAuthEnabled(): boolean {
+    return this.configService.get<string>('APPLE_AUTH_ENABLED') === 'true';
+  }
 
-    if (idToken.startsWith('mock-')) {
-      email = idToken.replace('mock-', '');
-      name = email.split('@')[0];
-      appleId = `apple-${name}`;
-    } else {
-      try {
-        const decoded = this.jwtService.decode(idToken) as any;
-        if (!decoded || !decoded.sub) {
-          throw new Error('Assinatura JWT ou payload inválido.');
-        }
-        email = decoded.email || 'apple-user@email.com';
-        name = email.split('@')[0];
-        appleId = decoded.sub;
-      } catch (error) {
-        this.logger.warn(`Validação real da Apple falhou: ${error.message}. Utilizando fallback mock.`);
-        email = idToken.includes('@') ? idToken : 'apple-user@email.com';
-        name = email.split('@')[0];
-        appleId = `mock-apple-id-${name}`;
-      }
+  private async resolveAppleProfile(idToken: string): Promise<{
+    email: string;
+    name: string;
+    appleId: string;
+  }> {
+    const clientId = this.configService.get<string>('APPLE_CLIENT_ID');
+    if (!clientId) {
+      throw new UnauthorizedException('Login com Apple não está configurado no servidor.');
     }
+
+    let payload: { sub: string; email?: string; email_verified?: string | boolean };
+    try {
+      payload = await appleSignin.verifyIdToken(idToken, {
+        audience: clientId,
+        ignoreExpiration: false,
+      });
+    } catch (error) {
+      this.logger.warn(`Token Apple inválido: ${(error as Error).message}`);
+      throw new UnauthorizedException('Token do Apple inválido ou expirado.');
+    }
+
+    if (!payload?.sub) {
+      throw new UnauthorizedException('A conta Apple não retornou um identificador válido.');
+    }
+
+    const email = payload.email;
+    if (!email) {
+      throw new UnauthorizedException('A conta Apple não compartilhou o e-mail.');
+    }
+    if (payload.email_verified === false || payload.email_verified === 'false') {
+      throw new UnauthorizedException('O e-mail da conta Apple não está verificado.');
+    }
+
+    return {
+      email,
+      name: email.split('@')[0],
+      appleId: payload.sub,
+    };
+  }
+
+  async loginWithApple(idToken: string) {
+    if (!this.isAppleAuthEnabled()) {
+      throw new ForbiddenException('Login com Apple não está disponível no momento.');
+    }
+
+    const { email, name, appleId } = await this.resolveAppleProfile(idToken);
 
     let isNewUser = false;
     let user = await this.usersRepository.findOne({ where: { appleId } });

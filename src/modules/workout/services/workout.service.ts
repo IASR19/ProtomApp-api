@@ -11,44 +11,11 @@ export class WorkoutService {
     private readonly workoutRepository: Repository<WorkoutEntity>,
   ) {}
 
-  async getTodayWorkout(userId: string): Promise<WorkoutEntity> {
-    const workout = await this.workoutRepository.findOne({
+  async getTodayWorkout(userId: string): Promise<WorkoutEntity | null> {
+    return this.workoutRepository.findOne({
       where: { userId },
       relations: { exercises: true },
     });
-
-    if (!workout) {
-      // Return a default mock workout object if none is set in DB to ensure graceful degradation
-      const defaultWorkout = new WorkoutEntity();
-      defaultWorkout.title = 'Treino A - Superior';
-      defaultWorkout.description = 'Foco em hipertrofia e gasto calórico';
-      defaultWorkout.duration = 55;
-      defaultWorkout.calories = 450;
-      defaultWorkout.cardio = 'Cardio: 30min Esteira (Zona 2)';
-      
-      const ex1 = new WorkoutExerciseEntity();
-      ex1.name = 'Supino Reto';
-      ex1.sets = 4;
-      ex1.reps = 12;
-      ex1.weight = 60;
-      
-      const ex2 = new WorkoutExerciseEntity();
-      ex2.name = 'Desenvolvimento';
-      ex2.sets = 3;
-      ex2.reps = 12;
-      ex2.weight = 30;
-
-      const ex3 = new WorkoutExerciseEntity();
-      ex3.name = 'Puxada Frontal';
-      ex3.sets = 4;
-      ex3.reps = 10;
-      ex3.weight = 50;
-
-      defaultWorkout.exercises = [ex1, ex2, ex3];
-      return defaultWorkout;
-    }
-
-    return workout;
   }
 
   async createWorkout(userId: string, title: string, description: string, duration: number, calories: number, cardio: string, exercisesDto: any[]): Promise<WorkoutEntity> {
