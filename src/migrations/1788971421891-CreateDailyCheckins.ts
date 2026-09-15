@@ -1,11 +1,13 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
+import { getMigrationSchema } from "./utils/schema";
 
 export class CreateDailyCheckins1788971421891 implements MigrationInterface {
     name = 'CreateDailyCheckins1788971421891'
 
     public async up(queryRunner: QueryRunner): Promise<void> {
+        const schema = getMigrationSchema(queryRunner);
         await queryRunner.query(`
-            CREATE TABLE IF NOT EXISTS "app"."daily_checkins" (
+            CREATE TABLE IF NOT EXISTS "${schema}"."daily_checkins" (
                 "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
                 "createdAt" TIMESTAMP NOT NULL DEFAULT now(),
                 "updatedAt" TIMESTAMP NOT NULL DEFAULT now(),
@@ -24,7 +26,7 @@ export class CreateDailyCheckins1788971421891 implements MigrationInterface {
         `);
         await queryRunner.query(`
             DO $$ BEGIN
-                ALTER TABLE "app"."daily_checkins" ADD CONSTRAINT "UQ_daily_checkins_userId_date" UNIQUE ("userId", "date");
+                ALTER TABLE "${schema}"."daily_checkins" ADD CONSTRAINT "UQ_daily_checkins_userId_date" UNIQUE ("userId", "date");
             EXCEPTION
                 WHEN duplicate_object THEN NULL;
                 WHEN duplicate_table THEN NULL;
@@ -32,7 +34,7 @@ export class CreateDailyCheckins1788971421891 implements MigrationInterface {
         `);
         await queryRunner.query(`
             DO $$ BEGIN
-                ALTER TABLE "app"."daily_checkins" ADD CONSTRAINT "FK_daily_checkins_userId" FOREIGN KEY ("userId") REFERENCES "app"."users"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+                ALTER TABLE "${schema}"."daily_checkins" ADD CONSTRAINT "FK_daily_checkins_userId" FOREIGN KEY ("userId") REFERENCES "${schema}"."users"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
             EXCEPTION
                 WHEN duplicate_object THEN NULL;
                 WHEN duplicate_table THEN NULL;
@@ -41,6 +43,7 @@ export class CreateDailyCheckins1788971421891 implements MigrationInterface {
     }
 
     public async down(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`DROP TABLE IF EXISTS "app"."daily_checkins"`);
+        const schema = getMigrationSchema(queryRunner);
+        await queryRunner.query(`DROP TABLE IF EXISTS "${schema}"."daily_checkins"`);
     }
 }
